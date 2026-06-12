@@ -1,4 +1,5 @@
 -- Minimal Neovim config using the built-in plugin manager (`vim.pack`)
+-- Small, mostly mini.nvim-based setup.
 -- Requires Neovim 0.12+
 
 vim.g.mapleader = ' '
@@ -33,7 +34,12 @@ require('mini.files').setup()
 require('mini.pick').setup()
 require('mini.extra').setup()
 require('mini.bracketed').setup()
-require('mini.diff').setup()
+require('mini.diff').setup({
+  view = {
+    style = 'sign',
+    signs = { add = '+', change = '~', delete = '-'},
+  }
+})
 require('mini.bufremove').setup()
 
 require('mini.jump2d').setup({
