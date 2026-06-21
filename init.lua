@@ -2,16 +2,26 @@
 -- Small, mostly mini.nvim-based setup.
 -- Requires Neovim 0.12+
 
+-- -----------------------------------------------------------------------------
+-- Leaders
+-- -----------------------------------------------------------------------------
+
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
--- Built-in plugin manager
+-- -----------------------------------------------------------------------------
+-- Plugins
+-- -----------------------------------------------------------------------------
+
 vim.pack.add({
   { src = 'https://github.com/echasnovski/mini.nvim' },
   { src = 'https://github.com/rluba/jai.vim' },
 })
 
--- Mini.nvim modules
+-- -----------------------------------------------------------------------------
+-- Basic UI and editor options
+-- -----------------------------------------------------------------------------
+
 require('mini.basics').setup({
   options = {
     extra_ui = true,
@@ -22,13 +32,16 @@ require('mini.basics').setup({
   },
 })
 
--- colorscheme
 vim.cmd.colorscheme('catppuccin')
 
--- Small personal options not covered by mini.basics
 vim.o.relativenumber = true
 vim.o.updatetime = 250
 vim.o.timeoutlen = 400
+vim.o.scrolloff = 8
+
+-- -----------------------------------------------------------------------------
+-- Mini.nvim: UI, navigation, and editing modules
+-- -----------------------------------------------------------------------------
 
 require('mini.icons').setup()
 require('mini.statusline').setup()
@@ -37,13 +50,18 @@ require('mini.files').setup()
 require('mini.pick').setup()
 require('mini.extra').setup()
 require('mini.bracketed').setup()
+require('mini.bufremove').setup()
+require('mini.pairs').setup()
+require('mini.surround').setup()
+require('mini.ai').setup()
+require('mini.completion').setup()
+
 require('mini.diff').setup({
   view = {
     style = 'sign',
-    signs = { add = '+', change = '~', delete = '-'},
-  }
+    signs = { add = '+', change = '~', delete = '-' },
+  },
 })
-require('mini.bufremove').setup()
 
 require('mini.jump2d').setup({
   mappings = {
@@ -51,7 +69,24 @@ require('mini.jump2d').setup({
   },
 })
 
+require('mini.comment').setup({
+  mappings = {
+    comment = '',
+    comment_line = '<leader>c',
+    comment_visual = '<leader>c',
+    textobject = '',
+  },
+})
+
+-- Make mini.icons work for plugins expecting nvim-web-devicons.
+MiniIcons.mock_nvim_web_devicons()
+
+-- -----------------------------------------------------------------------------
+-- Mini.nvim: highlighted patterns
+-- -----------------------------------------------------------------------------
+
 local hipatterns = require('mini.hipatterns')
+
 hipatterns.setup({
   highlighters = {
     fixme = { pattern = '%f[%w]()FIXME()%f[%W]', group = 'MiniHipatternsFixme' },
@@ -62,7 +97,12 @@ hipatterns.setup({
   },
 })
 
+-- -----------------------------------------------------------------------------
+-- Mini.nvim: indentation guides
+-- -----------------------------------------------------------------------------
+
 local indentscope = require('mini.indentscope')
+
 indentscope.setup({
   draw = {
     animation = indentscope.gen_animation.none(),
@@ -73,7 +113,12 @@ indentscope.setup({
   },
 })
 
+-- -----------------------------------------------------------------------------
+-- Mini.nvim: keybinding hints
+-- -----------------------------------------------------------------------------
+
 local miniclue = require('mini.clue')
+
 miniclue.setup({
   triggers = {
     { mode = 'n', keys = '<leader>' },
@@ -96,24 +141,10 @@ miniclue.setup({
   },
 })
 
-require('mini.pairs').setup()
-require('mini.surround').setup()
-require('mini.ai').setup()
-require('mini.comment').setup({
-  mappings = {
-    comment = '',
-    comment_line = '<leader>c',
-    comment_visual = '<leader>c',
-    textobject = '',
-  },
-})
-require('mini.completion').setup()
+-- -----------------------------------------------------------------------------
+-- Tree-sitter incremental selection
+-- -----------------------------------------------------------------------------
 
--- Minimal completion navigation. Use <C-Space> to open completion menu.
-vim.keymap.set('i', '<Tab>', [[pumvisible() ? "\<C-n>" : "\<Tab>"]], { expr = true, desc = 'Next completion item' })
-vim.keymap.set('i', '<S-Tab>', [[pumvisible() ? "\<C-p>" : "\<S-Tab>"]], { expr = true, desc = 'Previous completion item' })
-
--- Tree-sitter incremental selection with Alt-o / Alt-i.
 local ts_select_state = {}
 
 local get_ts_node = function()
@@ -174,16 +205,10 @@ _G.ts_selection_shrink = function()
   select_range(range)
 end
 
-vim.keymap.set({ 'n', 'x' }, '<M-o>', ts_selection_expand, { desc = 'Expand tree-sitter selection' })
-vim.keymap.set('x', '<M-i>', ts_selection_shrink, { desc = 'Shrink tree-sitter selection' })
+-- -----------------------------------------------------------------------------
+-- Terminal helper
+-- -----------------------------------------------------------------------------
 
--- Make mini.icons work for plugins expecting nvim-web-devicons
-MiniIcons.mock_nvim_web_devicons()
-
--- Keymaps
-local map = vim.keymap.set
-
--- Toggleable terminal
 _G.toggle_terminal = function()
   local buf = vim.g.toggle_terminal_buf
 
@@ -209,9 +234,25 @@ _G.toggle_terminal = function()
   vim.cmd('startinsert')
 end
 
+-- -----------------------------------------------------------------------------
+-- Keymaps
+-- -----------------------------------------------------------------------------
+
+local map = vim.keymap.set
+
+-- Completion navigation. Use <C-Space> to open completion menu.
+map('i', '<Tab>', [[pumvisible() ? "\<C-n>" : "\<Tab>"]], { expr = true, desc = 'Next completion item' })
+map('i', '<S-Tab>', [[pumvisible() ? "\<C-p>" : "\<S-Tab>"]], { expr = true, desc = 'Previous completion item' })
+
+-- Tree-sitter selection.
+map({ 'n', 'x' }, '<M-o>', ts_selection_expand, { desc = 'Expand tree-sitter selection' })
+map('x', '<M-i>', ts_selection_shrink, { desc = 'Shrink tree-sitter selection' })
+
+-- Terminal.
 map('n', '<leader>t', toggle_terminal, { desc = 'Toggle terminal' })
 map('t', '<leader>t', '<C-\\><C-n><cmd>lua toggle_terminal()<cr>', { desc = 'Toggle terminal' })
 
+-- Files, pickers, buffers, and common commands.
 map('n', '<leader>e', MiniFiles.open, { desc = 'File explorer' })
 map('n', '<leader>E', function()
   MiniFiles.open(vim.api.nvim_buf_get_name(0), false)
@@ -220,13 +261,14 @@ map('n', '<leader>ff', MiniPick.builtin.files, { desc = 'Find files' })
 map('n', '<leader>fg', MiniPick.builtin.grep_live, { desc = 'Live grep' })
 map('n', '<leader>fb', MiniPick.builtin.buffers, { desc = 'Find buffers' })
 map('n', '<leader>fh', MiniPick.builtin.help, { desc = 'Find help' })
+map('n', '<leader>fc', '<cmd>edit ~/.config/nvim/init.lua<cr>', { desc = 'Open Neovim config' })
 map('n', '<leader>q', '<cmd>quit<cr>', { desc = 'Quit' })
 map('n', '<leader>m', '<cmd>make<cr><cmd>copen<cr>', { desc = 'Make and open quickfix' })
 map('n', '<leader>bd', MiniBufremove.delete, { desc = 'Delete buffer' })
 map('n', '<leader>bD', function() MiniBufremove.delete(0, true) end, { desc = 'Force delete buffer' })
 map('n', '<leader>go', MiniDiff.toggle_overlay, { desc = 'Toggle diff overlay' })
 
--- Window commands
+-- Windows.
 map('n', '<leader>ww', '<cmd>wincmd w<cr>', { desc = 'Next window' })
 map('n', '<leader>wh', '<cmd>wincmd h<cr>', { desc = 'Window left' })
 map('n', '<leader>wj', '<cmd>wincmd j<cr>', { desc = 'Window down' })
@@ -238,7 +280,7 @@ map('n', '<leader>wq', '<cmd>close<cr>', { desc = 'Close window' })
 map('n', '<leader>wo', '<cmd>only<cr>', { desc = 'Only window' })
 map('n', '<leader>w=', '<cmd>wincmd =<cr>', { desc = 'Equalize windows' })
 
--- Quickfix navigation
+-- Quickfix.
 local qf_next = function()
   local ok = pcall(vim.cmd.cnext)
   if not ok then pcall(vim.cmd.cfirst) end
@@ -252,10 +294,13 @@ end
 map('n', ']q', qf_next, { desc = 'Next quickfix item' })
 map('n', '[q', qf_prev, { desc = 'Previous quickfix item' })
 
--- Diagnostics
+-- Diagnostics.
 map('n', '<leader>d', vim.diagnostic.open_float, { desc = 'Line diagnostic' })
 
--- LSP defaults: when a language server attaches, add common keymaps.
+-- -----------------------------------------------------------------------------
+-- LSP keymaps, formatting, and commands
+-- -----------------------------------------------------------------------------
+
 vim.api.nvim_create_autocmd('LspAttach', {
   callback = function(args)
     local opts = { buffer = args.buf }
@@ -284,7 +329,10 @@ vim.api.nvim_create_autocmd('BufWritePre', {
   end,
 })
 
+-- -----------------------------------------------------------------------------
 -- LSP servers
+-- -----------------------------------------------------------------------------
+
 vim.lsp.config('ty', {
   cmd = { 'ty', 'server' },
   filetypes = { 'python' },
@@ -301,6 +349,10 @@ vim.lsp.config('ruff', {
 })
 vim.lsp.enable('ruff')
 
+-- -----------------------------------------------------------------------------
+-- Filetype-specific settings
+-- -----------------------------------------------------------------------------
+
 -- Jai compiler errors: /path/file.jai:22,5: Error: message
 vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
   pattern = '*.jai',
@@ -308,4 +360,3 @@ vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
     vim.opt_local.errorformat = [[%f:%l\,%c: %m]]
   end,
 })
-
