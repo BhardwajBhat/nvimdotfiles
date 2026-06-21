@@ -22,6 +22,9 @@ require('mini.basics').setup({
   },
 })
 
+-- colorscheme
+vim.cmd.colorscheme('catppuccin')
+
 -- Small personal options not covered by mini.basics
 vim.o.relativenumber = true
 vim.o.updatetime = 250
@@ -261,17 +264,42 @@ vim.api.nvim_create_autocmd('LspAttach', {
     map('n', 'K', vim.lsp.buf.hover, opts)
     map('n', '<leader>r', vim.lsp.buf.rename, opts)
     map({ 'n', 'x' }, '<leader>a', vim.lsp.buf.code_action, opts)
-    map('n', '<leader>f', function() vim.lsp.buf.format({ async = true }) end, opts)
+  end,
+})
+
+vim.api.nvim_create_user_command('Format', function()
+  vim.lsp.buf.format({ async = true })
+end, { desc = 'Format current buffer with LSP' })
+
+vim.api.nvim_create_autocmd('BufWritePre', {
+  callback = function(args)
+    local clients = vim.lsp.get_clients({ bufnr = args.buf })
+    local has_formatter = vim.iter(clients):any(function(client)
+      return client:supports_method('textDocument/formatting', args.buf)
+    end)
+
+    if has_formatter then
+      vim.lsp.buf.format({ bufnr = args.buf, async = false, timeout_ms = 1000 })
+    end
   end,
 })
 
 -- LSP servers
-vim.lsp.config('ols', {
-  cmd = { 'ols' },
-  filetypes = { 'odin' },
-  root_markers = { 'ols.json', 'odin.json', '.git' },
+vim.lsp.config('ty', {
+  cmd = { 'ty', 'server' },
+  filetypes = { 'python' },
+  root_markers = { 'pyproject.toml', 'ty.toml', 'setup.py', 'setup.cfg', 'requirements.txt', '.git' },
+  capabilities = MiniCompletion.get_lsp_capabilities(),
 })
-vim.lsp.enable('ols')
+vim.lsp.enable('ty')
+
+vim.lsp.config('ruff', {
+  cmd = { 'ruff', 'server' },
+  filetypes = { 'python' },
+  root_markers = { 'pyproject.toml', 'ruff.toml', '.ruff.toml', '.git' },
+  capabilities = MiniCompletion.get_lsp_capabilities(),
+})
+vim.lsp.enable('ruff')
 
 -- Jai compiler errors: /path/file.jai:22,5: Error: message
 vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
@@ -281,35 +309,3 @@ vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
   end,
 })
 
--- External formatters. Add more filetypes here as needed.
-local formatters = {
-  odin = { 'odinfmt', '-stdin' },
-}
-
-vim.api.nvim_create_autocmd('BufWritePre', {
-  callback = function()
-    local cmd = formatters[vim.bo.filetype]
-    if cmd == nil then return end
-
-    if vim.fn.executable(cmd[1]) == 0 then
-      vim.notify(cmd[1] .. ' not found', vim.log.levels.WARN, { title = 'formatter' })
-      return
-    end
-
-    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-    local input = table.concat(lines, '\n') .. '\n'
-    local output = vim.fn.system(cmd, input)
-
-    if vim.v.shell_error ~= 0 then
-      vim.notify(output, vim.log.levels.ERROR, { title = cmd[1] .. ' failed' })
-      return
-    end
-
-    local formatted = vim.split(output, '\n', { plain = true })
-    if formatted[#formatted] == '' then table.remove(formatted) end
-
-    local view = vim.fn.winsaveview()
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, formatted)
-    vim.fn.winrestview(view)
-  end,
-})
