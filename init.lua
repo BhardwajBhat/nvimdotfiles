@@ -38,6 +38,8 @@ vim.o.relativenumber = true
 vim.o.updatetime = 250
 vim.o.timeoutlen = 400
 vim.o.scrolloff = 8
+vim.o.autoread = true
+vim.o.clipboard = 'unnamedplus'
 
 -- -----------------------------------------------------------------------------
 -- Mini.nvim: UI, navigation, and editing modules
@@ -206,11 +208,23 @@ _G.ts_selection_shrink = function()
 end
 
 -- -----------------------------------------------------------------------------
+-- Auto-reload files changed outside Neovim
+-- -----------------------------------------------------------------------------
+
+vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHoldI' }, {
+  callback = function()
+    if vim.fn.mode() ~= 'c' then
+      vim.cmd('checktime')
+    end
+  end,
+})
+
+-- -----------------------------------------------------------------------------
 -- Terminal helper
 -- -----------------------------------------------------------------------------
 
-_G.toggle_terminal = function()
-  local buf = vim.g.toggle_terminal_buf
+local toggle_terminal_window = function(buf_var, open_cmd, setup_win)
+  local buf = vim.g[buf_var]
 
   if buf and vim.api.nvim_buf_is_valid(buf) then
     for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -221,17 +235,30 @@ _G.toggle_terminal = function()
     end
   end
 
-  vim.cmd('botright 12split')
-  vim.cmd('setlocal winfixheight')
+  vim.cmd(open_cmd)
+  setup_win()
 
   if buf and vim.api.nvim_buf_is_valid(buf) then
     vim.api.nvim_win_set_buf(0, buf)
   else
     vim.cmd('terminal')
-    vim.g.toggle_terminal_buf = vim.api.nvim_get_current_buf()
+    vim.g[buf_var] = vim.api.nvim_get_current_buf()
   end
 
   vim.cmd('startinsert')
+end
+
+_G.toggle_terminal = function()
+  toggle_terminal_window('toggle_terminal_buf', 'botright 12split', function()
+    vim.cmd('setlocal winfixheight')
+  end)
+end
+
+_G.toggle_side_terminal = function()
+  local width = math.max(50, math.floor(vim.o.columns * 0.40))
+  toggle_terminal_window('toggle_side_terminal_buf', 'botright ' .. width .. 'vsplit', function()
+    vim.cmd('setlocal winfixwidth')
+  end)
 end
 
 -- -----------------------------------------------------------------------------
@@ -249,10 +276,27 @@ map({ 'n', 'x' }, '<M-o>', ts_selection_expand, { desc = 'Expand tree-sitter sel
 map('x', '<M-i>', ts_selection_shrink, { desc = 'Shrink tree-sitter selection' })
 
 -- Terminal.
-map('n', '<leader>t', toggle_terminal, { desc = 'Toggle terminal' })
-map('t', '<leader>t', '<C-\\><C-n><cmd>lua toggle_terminal()<cr>', { desc = 'Toggle terminal' })
+-- Keep terminal buffers in insert mode when entering them. If a terminal is in
+-- terminal-normal mode, <Space> is interpreted as the leader key and waits for
+-- `timeoutlen`, which can feel like a short pause while typing.
+vim.api.nvim_create_autocmd({ 'TermOpen', 'BufEnter', 'WinEnter' }, {
+  pattern = 'term://*',
+  callback = function()
+    vim.cmd('startinsert')
+  end,
+})
+
+map('t', '<Space>', '<Space>', { nowait = true, desc = 'Send literal space' })
+map('n', '<C-`>', toggle_terminal, { desc = 'Toggle bottom terminal' })
+map('t', '<C-`>', '<C-\\><C-n><cmd>lua toggle_terminal()<cr>', { desc = 'Toggle bottom terminal' })
+map('n', '<C-a>', toggle_side_terminal, { desc = 'Toggle side terminal' })
+map('t', '<C-a>', '<C-\\><C-n><cmd>lua toggle_side_terminal()<cr>', { desc = 'Toggle side terminal' })
 
 -- Files, pickers, buffers, and common commands.
+map('n', '<leader>uw', function()
+  vim.wo.wrap = not vim.wo.wrap
+end, { desc = 'Toggle line wrap' })
+map('n', '<leader>ur', '<cmd>source ~/.config/nvim/init.lua<cr>', { desc = 'Reload Neovim config' })
 map('n', '<leader>e', MiniFiles.open, { desc = 'File explorer' })
 map('n', '<leader>E', function()
   MiniFiles.open(vim.api.nvim_buf_get_name(0), false)
@@ -264,6 +308,7 @@ map('n', '<leader>fh', MiniPick.builtin.help, { desc = 'Find help' })
 map('n', '<leader>fc', '<cmd>edit ~/.config/nvim/init.lua<cr>', { desc = 'Open Neovim config' })
 map('n', '<leader>q', '<cmd>quit<cr>', { desc = 'Quit' })
 map('n', '<leader>m', '<cmd>make<cr><cmd>copen<cr>', { desc = 'Make and open quickfix' })
+map('n', '<leader>bb', '<cmd>buffer #<cr>', { desc = 'Alternate buffer' })
 map('n', '<leader>bd', MiniBufremove.delete, { desc = 'Delete buffer' })
 map('n', '<leader>bD', function() MiniBufremove.delete(0, true) end, { desc = 'Force delete buffer' })
 map('n', '<leader>go', MiniDiff.toggle_overlay, { desc = 'Toggle diff overlay' })
