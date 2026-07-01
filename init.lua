@@ -223,8 +223,16 @@ vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHo
 -- Terminal helper
 -- -----------------------------------------------------------------------------
 
+local hide_toggle_terminal_buffer = function(buf)
+  if buf and vim.api.nvim_buf_is_valid(buf) then
+    -- Keep toggle terminals out of :buffers, MiniPick buffers, and mini.tabline.
+    vim.bo[buf].buflisted = false
+  end
+end
+
 local toggle_terminal_window = function(buf_var, open_cmd, setup_win)
   local buf = vim.g[buf_var]
+  hide_toggle_terminal_buffer(buf)
 
   if buf and vim.api.nvim_buf_is_valid(buf) then
     for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -243,6 +251,7 @@ local toggle_terminal_window = function(buf_var, open_cmd, setup_win)
   else
     vim.cmd('terminal')
     vim.g[buf_var] = vim.api.nvim_get_current_buf()
+    hide_toggle_terminal_buffer(vim.g[buf_var])
   end
 
   vim.cmd('startinsert')
