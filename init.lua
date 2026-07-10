@@ -361,6 +361,34 @@ _G.toggle_side_terminal = function()
   end)
 end
 
+_G.open_gitui = function()
+  if vim.fn.executable('gitui') == 0 then
+    vim.notify('gitui executable not found', vim.log.levels.ERROR)
+    return
+  end
+
+  local root = vim.fs.root(0, '.git') or vim.fn.getcwd()
+  vim.cmd('tabnew')
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.cmd('lcd ' .. vim.fn.fnameescape(root))
+
+  vim.fn.termopen({ 'gitui' }, {
+    on_exit = function()
+      vim.schedule(function()
+        if vim.api.nvim_tabpage_is_valid(tab) then
+          vim.api.nvim_set_current_tabpage(tab)
+          vim.cmd('tabclose!')
+        end
+      end)
+    end,
+  })
+
+  vim.bo.buflisted = false
+  vim.cmd('startinsert')
+end
+
+vim.api.nvim_create_user_command('Gitui', open_gitui, { desc = 'Open gitui in a terminal tab' })
+
 -- -----------------------------------------------------------------------------
 -- Keymaps
 -- -----------------------------------------------------------------------------
@@ -414,6 +442,7 @@ map('n', '<C-Tab>', '<cmd>buffer #<cr>', { desc = 'Alternate buffer' })
 map('n', '<leader>bd', MiniBufremove.delete, { desc = 'Delete buffer' })
 map('n', '<leader>bD', function() MiniBufremove.delete(0, true) end, { desc = 'Force delete buffer' })
 map('n', '<leader>go', MiniDiff.toggle_overlay, { desc = 'Toggle diff overlay' })
+map('n', '<leader>gg', open_gitui, { desc = 'Open gitui' })
 
 -- Windows.
 map('n', '<leader>ww', '<cmd>wincmd w<cr>', { desc = 'Next window' })
