@@ -2,16 +2,15 @@
 -- Small, mostly mini.nvim-based setup.
 -- Requires Neovim 0.12+
 
--- -----------------------------------------------------------------------------
 -- Leaders
--- -----------------------------------------------------------------------------
 
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
--- -----------------------------------------------------------------------------
+-- Keep custom autocommands idempotent when reloading this file.
+local config_augroup = vim.api.nvim_create_augroup('user_config', { clear = true })
+
 -- Plugins
--- -----------------------------------------------------------------------------
 
 vim.pack.add({
   { src = 'https://github.com/echasnovski/mini.nvim' },
@@ -40,9 +39,7 @@ end, {
   desc = 'Delete unused vim.pack plugins and update managed plugins',
 })
 
--- -----------------------------------------------------------------------------
 -- Basic UI and editor options
--- -----------------------------------------------------------------------------
 
 require('mini.basics').setup({
   options = {
@@ -64,9 +61,7 @@ vim.o.autoread = true
 vim.o.clipboard = 'unnamedplus'
 vim.o.confirm = true
 
--- -----------------------------------------------------------------------------
 -- Mini.nvim: UI, navigation, and editing modules
--- -----------------------------------------------------------------------------
 
 require('mini.icons').setup()
 require('mini.statusline').setup()
@@ -107,9 +102,7 @@ require('mini.comment').setup({
 -- Make mini.icons work for plugins expecting nvim-web-devicons.
 MiniIcons.mock_nvim_web_devicons()
 
--- -----------------------------------------------------------------------------
 -- Mini.nvim: highlighted patterns
--- -----------------------------------------------------------------------------
 
 local hipatterns = require('mini.hipatterns')
 
@@ -123,9 +116,7 @@ hipatterns.setup({
   },
 })
 
--- -----------------------------------------------------------------------------
 -- Mini.nvim: indentation guides
--- -----------------------------------------------------------------------------
 
 local indentscope = require('mini.indentscope')
 
@@ -139,9 +130,7 @@ indentscope.setup({
   },
 })
 
--- -----------------------------------------------------------------------------
 -- Mini.nvim: keybinding hints
--- -----------------------------------------------------------------------------
 
 local miniclue = require('mini.clue')
 
@@ -167,15 +156,13 @@ miniclue.setup({
   },
 })
 
--- -----------------------------------------------------------------------------
 -- Tree-sitter parsers, highlighting, folds, and indentation
--- -----------------------------------------------------------------------------
 
 require('nvim-treesitter').setup({
   install_dir = vim.fn.stdpath('data') .. '/site',
 })
 
-local treesitter_langs = {
+local treesitter_parsers = {
   'bash',
   'c',
   'cpp',
@@ -197,31 +184,23 @@ local treesitter_langs = {
   'yaml',
 }
 
--- Installs missing parsers asynchronously. Run `:TSUpdate` after `:packupdate`.
-require('nvim-treesitter').install(treesitter_langs)
+-- Installs missing parsers asynchronously. Run `:TSUpdate` after `:PackSync`.
+require('nvim-treesitter').install(treesitter_parsers)
 
-local treesitter_filetypes = {
-  'bash',
-  'c',
-  'cpp',
-  'css',
-  'html',
-  'javascript',
-  'json',
-  'lua',
-  'markdown',
-  'odin',
-  'python',
-  'query',
-  'rust',
-  'typescript',
-  'typescriptreact',
-  'vim',
-  'vimdoc',
-  'yaml',
+local treesitter_filetype_overrides = {
+  markdown_inline = false,
+  tsx = 'typescriptreact',
 }
 
+local treesitter_filetypes = vim.iter(treesitter_parsers)
+  :filter(function(parser) return treesitter_filetype_overrides[parser] ~= false end)
+  :map(function(parser)
+    return treesitter_filetype_overrides[parser] or parser
+  end)
+  :totable()
+
 vim.api.nvim_create_autocmd('FileType', {
+  group = config_augroup,
   pattern = treesitter_filetypes,
   callback = function(args)
     -- Highlighting is built into Neovim 0.12+. nvim-treesitter only installs
@@ -234,9 +213,7 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
--- -----------------------------------------------------------------------------
 -- Tree-sitter incremental selection
--- -----------------------------------------------------------------------------
 
 local ts_select_state = {}
 
@@ -262,12 +239,33 @@ local select_range = function(range)
   vim.api.nvim_win_set_cursor(0, { er + 1, ec })
 end
 
-_G.ts_selection_expand = function()
+local get_visual_range = function()
+  if vim.fn.mode() ~= 'v' then return nil end
+
+  local anchor = vim.fn.getpos('v')
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local start_pos = { anchor[2] - 1, anchor[3] - 1 }
+  local end_pos = { cursor[1] - 1, cursor[2] }
+
+  if start_pos[1] > end_pos[1] or (start_pos[1] == end_pos[1] and start_pos[2] > end_pos[2]) then
+    start_pos, end_pos = end_pos, start_pos
+  end
+
+  return { start_pos[1], start_pos[2], end_pos[1], end_pos[2] }
+end
+
+local ts_selection_expand = function()
   local win = vim.api.nvim_get_current_win()
-  local mode = vim.fn.mode()
-  local is_visual = mode == 'v' or mode == 'V' or mode == '\22'
-  local state = is_visual and ts_select_state[win] or nil
-  local node = state and state.node or get_ts_node()
+  local buf = vim.api.nvim_get_current_buf()
+  local visual_range = get_visual_range()
+  local state = visual_range and ts_select_state[win] or nil
+
+  if state ~= nil then
+    local last = state.stack[#state.stack]
+    if state.buf ~= buf or not vim.deep_equal(visual_range, last.range) then state = nil end
+  end
+
+  local node = state and state.stack[#state.stack].node or get_ts_node()
   if node == nil then return end
 
   if state ~= nil then
@@ -276,33 +274,31 @@ _G.ts_selection_expand = function()
   end
 
   local range = { node_range(node) }
-  ts_select_state[win] = { node = node, stack = state and state.stack or {} }
-  table.insert(ts_select_state[win].stack, range)
+  ts_select_state[win] = { buf = buf, stack = state and state.stack or {} }
+  table.insert(ts_select_state[win].stack, { node = node, range = range })
   select_range(range)
 end
 
-_G.ts_selection_shrink = function()
+local ts_selection_shrink = function()
   local win = vim.api.nvim_get_current_win()
   local state = ts_select_state[win]
-  if state == nil or #state.stack <= 1 then return end
+  local visual_range = get_visual_range()
+  if state == nil
+    or state.buf ~= vim.api.nvim_get_current_buf()
+    or not vim.deep_equal(visual_range, state.stack[#state.stack].range)
+    or #state.stack <= 1
+  then
+    return
+  end
 
   table.remove(state.stack)
-  local range = state.stack[#state.stack]
-  local node = get_ts_node()
-  while node ~= nil do
-    local candidate = { node_range(node) }
-    if vim.deep_equal(candidate, range) then break end
-    node = node:parent()
-  end
-  state.node = node or state.node
-  select_range(range)
+  select_range(state.stack[#state.stack].range)
 end
 
--- -----------------------------------------------------------------------------
 -- Auto-reload files changed outside Neovim
--- -----------------------------------------------------------------------------
 
 vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHoldI' }, {
+  group = config_augroup,
   callback = function()
     if vim.fn.mode() ~= 'c' then
       vim.cmd('checktime')
@@ -310,9 +306,7 @@ vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHo
   end,
 })
 
--- -----------------------------------------------------------------------------
 -- Terminal helper
--- -----------------------------------------------------------------------------
 
 local hide_toggle_terminal_buffer = function(buf)
   if buf and vim.api.nvim_buf_is_valid(buf) then
@@ -348,20 +342,20 @@ local toggle_terminal_window = function(buf_var, open_cmd, setup_win)
   vim.cmd('startinsert')
 end
 
-_G.toggle_terminal = function()
+local toggle_terminal = function()
   toggle_terminal_window('toggle_terminal_buf', 'botright 12split', function()
     vim.cmd('setlocal winfixheight')
   end)
 end
 
-_G.toggle_side_terminal = function()
+local toggle_side_terminal = function()
   local width = math.max(50, math.floor(vim.o.columns * 0.40))
   toggle_terminal_window('toggle_side_terminal_buf', 'botright ' .. width .. 'vsplit', function()
     vim.cmd('setlocal winfixwidth')
   end)
 end
 
-_G.open_gitui = function()
+local open_gitui = function()
   if vim.fn.executable('gitui') == 0 then
     vim.notify('gitui executable not found', vim.log.levels.ERROR)
     return
@@ -389,9 +383,7 @@ end
 
 vim.api.nvim_create_user_command('Gitui', open_gitui, { desc = 'Open gitui in a terminal tab' })
 
--- -----------------------------------------------------------------------------
 -- Keymaps
--- -----------------------------------------------------------------------------
 
 local map = vim.keymap.set
 
@@ -408,6 +400,7 @@ map('x', '<M-i>', ts_selection_shrink, { desc = 'Shrink tree-sitter selection' }
 -- terminal-normal mode, <Space> is interpreted as the leader key and waits for
 -- `timeoutlen`, which can feel like a short pause while typing.
 vim.api.nvim_create_autocmd({ 'TermOpen', 'BufEnter', 'WinEnter' }, {
+  group = config_augroup,
   pattern = 'term://*',
   callback = function()
     vim.cmd('startinsert')
@@ -416,9 +409,15 @@ vim.api.nvim_create_autocmd({ 'TermOpen', 'BufEnter', 'WinEnter' }, {
 
 map('t', '<Space>', '<Space>', { nowait = true, desc = 'Send literal space' })
 map('n', '<C-`>', toggle_terminal, { desc = 'Toggle bottom terminal' })
-map('t', '<C-`>', '<C-\\><C-n><cmd>lua toggle_terminal()<cr>', { desc = 'Toggle bottom terminal' })
+map('t', '<C-`>', function()
+  vim.cmd('stopinsert')
+  toggle_terminal()
+end, { desc = 'Toggle bottom terminal' })
 map('n', '<C-a>', toggle_side_terminal, { desc = 'Toggle side terminal' })
-map('t', '<C-a>', '<C-\\><C-n><cmd>lua toggle_side_terminal()<cr>', { desc = 'Toggle side terminal' })
+map('t', '<C-a>', function()
+  vim.cmd('stopinsert')
+  toggle_side_terminal()
+end, { desc = 'Toggle side terminal' })
 
 -- Files, pickers, buffers, and common commands.
 map('n', '<leader>uw', function()
@@ -436,7 +435,7 @@ map('n', '<leader>fb', MiniPick.builtin.buffers, { desc = 'Find buffers' })
 map('n', '<leader>fh', MiniPick.builtin.help, { desc = 'Find help' })
 map('n', '<leader>fc', '<cmd>edit ~/.config/nvim/init.lua<cr>', { desc = 'Open Neovim config' })
 map('n', '<leader>q', '<cmd>quit<cr>', { desc = 'Quit' })
-map('n', '<leader>m', '<cmd>make run<cr>', { desc = 'Make' })
+map('n', '<leader>m', '<cmd>make run<cr>', { desc = 'make run' })
 map('n', '<leader>bb', '<cmd>buffer #<cr>', { desc = 'Alternate buffer' })
 map('n', '<C-Tab>', '<cmd>buffer #<cr>', { desc = 'Alternate buffer' })
 map('n', '<leader>bd', MiniBufremove.delete, { desc = 'Delete buffer' })
@@ -478,11 +477,10 @@ end
 map('n', '<leader>d', vim.diagnostic.open_float, { desc = 'Line diagnostic' })
 map('n', '<leader>D', diagnostics_to_qflist, { desc = 'Diagnostics to quickfix' })
 
--- -----------------------------------------------------------------------------
 -- LSP keymaps, formatting, and commands
--- -----------------------------------------------------------------------------
 
 vim.api.nvim_create_autocmd('LspAttach', {
+  group = config_augroup,
   callback = function(args)
     local opts = { buffer = args.buf }
     map('n', 'gd', vim.lsp.buf.definition, opts)
@@ -493,59 +491,78 @@ vim.api.nvim_create_autocmd('LspAttach', {
   end,
 })
 
+local preferred_formatters = {
+  python = { ruff = true },
+}
+
+local is_preferred_formatter = function(client, buf)
+  local preferred = preferred_formatters[vim.bo[buf].filetype]
+  return preferred == nil or preferred[client.name] == true
+end
+
 vim.api.nvim_create_user_command('Format', function()
-  vim.lsp.buf.format({ async = true })
+  local buf = vim.api.nvim_get_current_buf()
+  vim.lsp.buf.format({
+    async = true,
+    filter = function(client) return is_preferred_formatter(client, buf) end,
+  })
 end, { desc = 'Format current buffer with LSP' })
 
 vim.api.nvim_create_autocmd('BufWritePre', {
+  group = config_augroup,
   callback = function(args)
     local clients = vim.lsp.get_clients({ bufnr = args.buf })
     local has_formatter = vim.iter(clients):any(function(client)
-      return client:supports_method('textDocument/formatting', args.buf)
+      return is_preferred_formatter(client, args.buf)
+        and client:supports_method('textDocument/formatting', args.buf)
     end)
 
     if has_formatter then
-      vim.lsp.buf.format({ bufnr = args.buf, async = false, timeout_ms = 1000 })
+      vim.lsp.buf.format({
+        bufnr = args.buf,
+        async = false,
+        timeout_ms = 3000,
+        filter = function(client) return is_preferred_formatter(client, args.buf) end,
+      })
     end
   end,
 })
 
--- -----------------------------------------------------------------------------
 -- LSP servers
--- -----------------------------------------------------------------------------
 
-vim.lsp.config('ty', {
+local lsp_capabilities = MiniCompletion.get_lsp_capabilities()
+
+local enable_lsp = function(name, config)
+  config.capabilities = lsp_capabilities
+  vim.lsp.config(name, config)
+  vim.lsp.enable(name)
+end
+
+enable_lsp('ty', {
   cmd = { 'ty', 'server' },
   filetypes = { 'python' },
   root_markers = { 'pyproject.toml', 'ty.toml', 'setup.py', 'setup.cfg', 'requirements.txt', '.git' },
-  capabilities = MiniCompletion.get_lsp_capabilities(),
 })
-vim.lsp.enable('ty')
 
-vim.lsp.config('ruff', {
+enable_lsp('ruff', {
   cmd = { 'ruff', 'server' },
   filetypes = { 'python' },
   root_markers = { 'pyproject.toml', 'ruff.toml', '.ruff.toml', '.git' },
-  capabilities = MiniCompletion.get_lsp_capabilities(),
 })
-vim.lsp.enable('ruff')
 
-vim.lsp.config('ols', {
+enable_lsp('ols', {
   cmd = { 'ols' },
   filetypes = { 'odin' },
   root_markers = { 'ols.json', '.git' },
   init_options = {
     enable_format = true,
   },
-  capabilities = MiniCompletion.get_lsp_capabilities(),
 })
-vim.lsp.enable('ols')
 
-vim.lsp.config('rust_analyzer', {
+enable_lsp('rust_analyzer', {
   cmd = { 'rust-analyzer' },
   filetypes = { 'rust' },
   root_markers = { 'Cargo.toml', 'rust-project.json', '.git' },
-  capabilities = MiniCompletion.get_lsp_capabilities(),
   settings = {
     ['rust-analyzer'] = {
       cargo = { allFeatures = true },
@@ -553,24 +570,18 @@ vim.lsp.config('rust_analyzer', {
     },
   },
 })
-vim.lsp.enable('rust_analyzer')
 
--- -----------------------------------------------------------------------------
 -- Filetype-specific settings
--- -----------------------------------------------------------------------------
 
--- Jai compiler errors: /path/file.jai:22,5: Error: message
-vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
-  pattern = '*.jai',
-  callback = function()
-    vim.opt_local.errorformat = [[%f:%l\,%c: %m]]
-  end,
-})
+local compiler_errorformats = {
+  jai = [[%f:%l\,%c: %m]], -- /path/file.jai:22,5: Error: message
+  odin = [[%f(%l:%c) %m,%-G%.%#]], -- /path/file.odin(22:5) Syntax Error: message
+}
 
--- Odin compiler errors: /path/file.odin(22:5) Syntax Error: message
-vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
-  pattern = '*.odin',
-  callback = function()
-    vim.opt_local.errorformat = [[%f(%l:%c) %m,%-G%.%#]]
+vim.api.nvim_create_autocmd('FileType', {
+  group = config_augroup,
+  pattern = vim.tbl_keys(compiler_errorformats),
+  callback = function(args)
+    vim.bo[args.buf].errorformat = compiler_errorformats[args.match]
   end,
 })
