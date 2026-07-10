@@ -15,7 +15,29 @@ vim.g.maplocalleader = ' '
 
 vim.pack.add({
   { src = 'https://github.com/echasnovski/mini.nvim' },
+  {
+    src = 'https://github.com/nvim-treesitter/nvim-treesitter',
+    name = 'nvim-treesitter',
+    version = 'main',
+  },
   { src = 'https://github.com/rluba/jai.vim' },
+})
+
+vim.api.nvim_create_user_command('PackSync', function(opts)
+  local unused = vim.iter(vim.pack.get(nil, { info = false }))
+    :filter(function(plugin) return not plugin.active end)
+    :map(function(plugin) return plugin.spec.name end)
+    :totable()
+
+  if #unused > 0 then
+    vim.pack.del(unused)
+    vim.notify('Deleted unused plugins: ' .. table.concat(unused, ', '))
+  end
+
+  vim.pack.update(nil, { force = opts.bang })
+end, {
+  bang = true,
+  desc = 'Delete unused vim.pack plugins and update managed plugins',
 })
 
 -- -----------------------------------------------------------------------------
@@ -40,6 +62,7 @@ vim.o.timeoutlen = 400
 vim.o.scrolloff = 8
 vim.o.autoread = true
 vim.o.clipboard = 'unnamedplus'
+vim.o.confirm = true
 
 -- -----------------------------------------------------------------------------
 -- Mini.nvim: UI, navigation, and editing modules
@@ -57,6 +80,7 @@ require('mini.pairs').setup()
 require('mini.surround').setup()
 require('mini.ai').setup()
 require('mini.completion').setup()
+require('mini.align').setup()
 
 require('mini.diff').setup({
   view = {
@@ -141,6 +165,73 @@ miniclue.setup({
     miniclue.gen_clues.windows(),
     miniclue.gen_clues.z(),
   },
+})
+
+-- -----------------------------------------------------------------------------
+-- Tree-sitter parsers, highlighting, folds, and indentation
+-- -----------------------------------------------------------------------------
+
+require('nvim-treesitter').setup({
+  install_dir = vim.fn.stdpath('data') .. '/site',
+})
+
+local treesitter_langs = {
+  'bash',
+  'c',
+  'cpp',
+  'css',
+  'html',
+  'javascript',
+  'json',
+  'lua',
+  'markdown',
+  'markdown_inline',
+  'odin',
+  'python',
+  'query',
+  'rust',
+  'tsx',
+  'typescript',
+  'vim',
+  'vimdoc',
+  'yaml',
+}
+
+-- Installs missing parsers asynchronously. Run `:TSUpdate` after `:packupdate`.
+require('nvim-treesitter').install(treesitter_langs)
+
+local treesitter_filetypes = {
+  'bash',
+  'c',
+  'cpp',
+  'css',
+  'html',
+  'javascript',
+  'json',
+  'lua',
+  'markdown',
+  'odin',
+  'python',
+  'query',
+  'rust',
+  'typescript',
+  'typescriptreact',
+  'vim',
+  'vimdoc',
+  'yaml',
+}
+
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = treesitter_filetypes,
+  callback = function(args)
+    -- Highlighting is built into Neovim 0.12+. nvim-treesitter only installs
+    -- parsers and provides queries.
+    pcall(vim.treesitter.start, args.buf)
+
+    vim.wo.foldmethod = 'expr'
+    vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
+    vim.wo.foldlevel = 99
+  end,
 })
 
 -- -----------------------------------------------------------------------------
@@ -306,6 +397,7 @@ map('n', '<leader>uw', function()
   vim.wo.wrap = not vim.wo.wrap
 end, { desc = 'Toggle line wrap' })
 map('n', '<leader>ur', '<cmd>source ~/.config/nvim/init.lua<cr>', { desc = 'Reload Neovim config' })
+map('n', '<leader>uH', '<cmd>checkhealth<cr>', { desc = 'Check health' })
 map('n', '<leader>e', MiniFiles.open, { desc = 'File explorer' })
 map('n', '<leader>E', function()
   MiniFiles.open(vim.api.nvim_buf_get_name(0), false)
@@ -316,8 +408,9 @@ map('n', '<leader>fb', MiniPick.builtin.buffers, { desc = 'Find buffers' })
 map('n', '<leader>fh', MiniPick.builtin.help, { desc = 'Find help' })
 map('n', '<leader>fc', '<cmd>edit ~/.config/nvim/init.lua<cr>', { desc = 'Open Neovim config' })
 map('n', '<leader>q', '<cmd>quit<cr>', { desc = 'Quit' })
-map('n', '<leader>m', '<cmd>make<cr><cmd>copen<cr>', { desc = 'Make and open quickfix' })
+map('n', '<leader>m', '<cmd>make run<cr>', { desc = 'Make' })
 map('n', '<leader>bb', '<cmd>buffer #<cr>', { desc = 'Alternate buffer' })
+map('n', '<C-Tab>', '<cmd>buffer #<cr>', { desc = 'Alternate buffer' })
 map('n', '<leader>bd', MiniBufremove.delete, { desc = 'Delete buffer' })
 map('n', '<leader>bD', function() MiniBufremove.delete(0, true) end, { desc = 'Force delete buffer' })
 map('n', '<leader>go', MiniDiff.toggle_overlay, { desc = 'Toggle diff overlay' })
@@ -349,7 +442,12 @@ map('n', ']q', qf_next, { desc = 'Next quickfix item' })
 map('n', '[q', qf_prev, { desc = 'Previous quickfix item' })
 
 -- Diagnostics.
+local diagnostics_to_qflist = function()
+  vim.diagnostic.setqflist({ open = true })
+end
+
 map('n', '<leader>d', vim.diagnostic.open_float, { desc = 'Line diagnostic' })
+map('n', '<leader>D', diagnostics_to_qflist, { desc = 'Diagnostics to quickfix' })
 
 -- -----------------------------------------------------------------------------
 -- LSP keymaps, formatting, and commands
@@ -403,6 +501,31 @@ vim.lsp.config('ruff', {
 })
 vim.lsp.enable('ruff')
 
+vim.lsp.config('ols', {
+  cmd = { 'ols' },
+  filetypes = { 'odin' },
+  root_markers = { 'ols.json', '.git' },
+  init_options = {
+    enable_format = true,
+  },
+  capabilities = MiniCompletion.get_lsp_capabilities(),
+})
+vim.lsp.enable('ols')
+
+vim.lsp.config('rust_analyzer', {
+  cmd = { 'rust-analyzer' },
+  filetypes = { 'rust' },
+  root_markers = { 'Cargo.toml', 'rust-project.json', '.git' },
+  capabilities = MiniCompletion.get_lsp_capabilities(),
+  settings = {
+    ['rust-analyzer'] = {
+      cargo = { allFeatures = true },
+      check = { command = 'clippy' },
+    },
+  },
+})
+vim.lsp.enable('rust_analyzer')
+
 -- -----------------------------------------------------------------------------
 -- Filetype-specific settings
 -- -----------------------------------------------------------------------------
@@ -412,5 +535,13 @@ vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
   pattern = '*.jai',
   callback = function()
     vim.opt_local.errorformat = [[%f:%l\,%c: %m]]
+  end,
+})
+
+-- Odin compiler errors: /path/file.odin(22:5) Syntax Error: message
+vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
+  pattern = '*.odin',
+  callback = function()
+    vim.opt_local.errorformat = [[%f(%l:%c) %m,%-G%.%#]]
   end,
 })
