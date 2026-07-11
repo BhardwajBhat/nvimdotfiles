@@ -20,6 +20,7 @@ vim.pack.add({
     version = 'main',
   },
   { src = 'https://github.com/rluba/jai.vim' },
+  { src = 'https://github.com/mg979/vim-visual-multi', version = 'master' },
 })
 
 vim.api.nvim_create_user_command('PackSync', function(opts)
