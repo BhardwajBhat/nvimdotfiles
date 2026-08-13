@@ -52,7 +52,7 @@ require('mini.basics').setup({
   },
 })
 
-vim.cmd.colorscheme('catppuccin')
+vim.cmd.colorscheme('minicyan')
 
 vim.o.relativenumber = true
 vim.o.updatetime = 250
