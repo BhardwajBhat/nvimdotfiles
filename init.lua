@@ -20,7 +20,6 @@ vim.pack.add({
     version = 'main',
   },
   { src = 'https://github.com/rluba/jai.vim' },
-  { src = 'https://github.com/mg979/vim-visual-multi', version = 'master' },
 })
 
 vim.api.nvim_create_user_command('PackSync', function(opts)
@@ -183,6 +182,7 @@ local treesitter_parsers = {
   'vim',
   'vimdoc',
   'yaml',
+  'zig',
 }
 
 -- Installs missing parsers asynchronously. Run `:TSUpdate` after `:PackSync`.
